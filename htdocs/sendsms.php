@@ -21,11 +21,12 @@
 
 # This page is called to send random generated password to user by SMS
 
+use Ssp\ResultCode\ResultCode;
 #==============================================================================
 # POST parameters
 #==============================================================================
 # Initiate vars
-$result = "";
+$result = ResultCode::SUCCESS;
 $login = $presetLogin;
 $sms = "";
 $phone = "";
@@ -45,7 +46,7 @@ $attempts = 0;
 # By default, phone needs to be given (this can be deactivated in configuration.)
 #==============================================================================
 if (!$crypt_tokens) {
-    $result = "crypttokensrequired";
+    $result = ResultCode::CRYPT_TOKENS_REQUIRED;
 }else{
     if (!isset($_POST["smstoken"]) and !$sms_use_ldap ) {
         if (isset($_REQUEST["phone"]) and $_REQUEST["phone"]) {
@@ -57,7 +58,7 @@ if (!$crypt_tokens) {
                 $phone = truncate_number($phone);
             }
         }else{
-            $result = "smsrequired";
+            $result = ResultCode::SMS_REQUIRED;
         }
         if (isset($_POST["login"]) and $_POST["login"]) {
             $login = strval($_REQUEST["login"]);
@@ -67,10 +68,10 @@ if (!$crypt_tokens) {
             }
         } else {
             $login= false;
-            $result = "loginrequired";
+            $result = ResultCode::LOGIN_REQUIRED;
         }
         if ((!$login) and (!$phone)){
-            $result = "emptysendsmsform";
+            $result = ResultCode::EMPTY_SEND_SMS_FORM;
         }
     }
 #==============================================================================
@@ -99,52 +100,52 @@ if (!$crypt_tokens) {
         } elseif ($sessiontoken != $smstoken) {
             if ($attempts < $max_attempts) {
                 $_SESSION['attempts'] = $attempts + 1;
-                $result = "tokenattempts";
+                $result = ResultCode::TOKEN_ATTEMPTS;
                 error_log("SMS token $smstoken not valid, attempt $attempts");
             } else {
-                $result = "tokennotvalid";
+                $result = ResultCode::TOKEN_NOT_VALID;
                 error_log("SMS token $smstoken not valid");
             }
         } elseif (isset($token_lifetime)) {
             $tokentime = $_SESSION['time'];
             if ( time() - $tokentime > $token_lifetime ) {
-                $result = "tokennotvalid";
+                $result = ResultCode::TOKEN_NOT_VALID;
                 error_log("Token lifetime expired");
             }
         }
-        if ( $result === "tokennotvalid" ) {
+        if ( $result === ResultCode::TOKEN_NOT_VALID ) {
             $_SESSION = array();
             session_destroy();
         }
-        if ( $result === "" ) {
+        if ( $result === ResultCode::SUCCESS ) {
             $_SESSION = array();
             session_destroy();
-            $result = "buildtoken";
+            $result = ResultCode::BUILD_TOKEN;
         }
     } elseif (isset($_REQUEST["encrypted_sms_login"])) {
         $decrypted_sms_login = explode(':', decrypt($_REQUEST["encrypted_sms_login"], $keyphrase));
         $login = $decrypted_sms_login[1];
         [$result, $phone] = get_mobile_and_displayname($login);
-        if (!$result) { $result = "sendsms"; }
+        if ($result === ResultCode::SUCCESS) { $result = ResultCode::SEND_SMS; }
     } elseif (isset($_REQUEST["login"]) and $_REQUEST["login"] and $sms_use_ldap) {
         $login = strval($_REQUEST["login"]);
         $result = check_username_validity($login,$login_forbidden_chars);
     }else{
-        $result = "emptysendsmsform";
+        $result = ResultCode::EMPTY_SEND_SMS_FORM;
     }
 }
 
 #==============================================================================
 # Check captcha
 #==============================================================================
-if ( $result === "" and $use_captcha) {
+if ( $result === ResultCode::SUCCESS and $use_captcha) {
         $result = global_captcha_check();
 }
 
 #==============================================================================
 # Check sms
 #==============================================================================
-if ( $result === "" ) {
+if ( $result === ResultCode::SUCCESS ) {
     [$result, $sms, $displayname] = get_mobile_and_displayname($login);
     if ($sms){
         if (!$sms_use_ldap) {
@@ -152,10 +153,10 @@ if ( $result === "" ) {
             if (strcasecmp($sms, $phone) == 0) {
                 $match = true;
                 $encrypted_sms_login = encrypt("$sms:$login", $keyphrase);
-                $result = "sendsms";
+                $result = ResultCode::SEND_SMS;
             }
             if (!$match){
-                list($result, $token) = obscure_info_sendsms("smssent_ifexists","smsnomatch");
+                list($result, $token) = obscure_info_sendsms(ResultCode::SMS_SENT_IF_EXISTS, ResultCode::SMS_NO_MATCH);
                 error_log("SMS number $phone does not match for user $login");
             }
         }else{
@@ -164,11 +165,11 @@ if ( $result === "" ) {
             if ( $sms_partially_hide_number ) {
                 $smsdisplay = substr_replace($sms, '****', 4 , 4);
             }
-            $result = "smsuserfound";
+            $result = ResultCode::SMS_USER_FOUND;
         }
         if ($use_ratelimit) {
             if ( !allowed_rate($login,$_SERVER[$client_ip_header],$rrl_config) ) {
-                $result = "throttle";
+                $result = ResultCode::THROTTLE;
                 error_log("LDAP - User $login too fast");
             }
         }
@@ -179,7 +180,7 @@ if ( $result === "" ) {
 #==============================================================================
 # Generate sms token and send by sms
 #==============================================================================
-if ($result === "sendsms") {
+if ($result === ResultCode::SEND_SMS) {
 
     # Generate sms token
     $smstoken = generate_sms_token($sms_token_length);
@@ -203,14 +204,14 @@ if ($result === "sendsms") {
 
         if (send_mail($mailer, $smsmailto, $mail_from, $mail_from_name, $smsmail_subject, $sms_message, $data)) {
             $token  = encrypt(session_id(), $keyphrase);
-            $result = "smssent";
+            $result = ResultCode::SMS_SENT;
             if (!empty($reset_request_log)) {
                 error_log("Send SMS code $smstoken by $sms_method to $sms\n\n", 3, $reset_request_log);
             } else {
                 error_log("Send SMS code $smstoken by $sms_method to $sms");
             }
         } else {
-            $result = "smsnotsent";
+            $result = ResultCode::SMS_NOT_SEND;
             error_log("Error while sending sms by $sms_method to $sms (user $login)");
         }
 
@@ -218,7 +219,7 @@ if ($result === "sendsms") {
 
     if ($sms_method === "api") {
         if (!$sms_api_lib) {
-            $result = "smsnotsent";
+            $result = ResultCode::SMS_NOT_SEND;
             error_log('No API library found, set $sms_api_lib in configuration.');
         } else {
             include_once("../".$sms_api_lib);
@@ -226,14 +227,14 @@ if ($result === "sendsms") {
             $sms_message = str_replace('{smstoken}', $smstoken, $sms_message);
             if (send_sms_by_api($sms, $sms_message)) {
                 $token  = encrypt(session_id(), $keyphrase);
-                $result = "smssent";
+                $result = ResultCode::SMS_SENT;
                 if ( !empty($reset_request_log) ) {
                     error_log("Send SMS code $smstoken by $sms_method to $sms\n\n", 3, $reset_request_log);
                 } else {
                     error_log("Send SMS code $smstoken by $sms_method to $sms");
                 }
             } else {
-                $result = "smsnotsent";
+                $result = ResultCode::SMS_NOT_SEND;
                 error_log("Error while sending sms by $sms_method to $sms (user $login)");
             }
         }
@@ -243,7 +244,7 @@ if ($result === "sendsms") {
 #==============================================================================
 # Build and store token
 #==============================================================================
-if ($result === "buildtoken") {
+if ($result === ResultCode::BUILD_TOKEN) {
 
     # Use PHP session to register token
     # We do not generate cookie
@@ -258,13 +259,13 @@ if ($result === "buildtoken") {
 
     $token = encrypt(session_id(), $keyphrase);
 
-    $result = "redirect";
+    $result = ResultCode::REDIRECT;
 }
 
 #==============================================================================
 # Redirect to resetbytoken page
 #==============================================================================
-if ($result === "redirect") {
+if ($result === ResultCode::REDIRECT) {
 
     $resetbytoken_url = $script_name . "?action=resetbytoken&source=sms&token=".urlencode($token)."&smstoken=".urlencode($smstoken);
 
@@ -317,7 +318,6 @@ function truncate_number($phone_number){
 function get_mobile_and_displayname($login) {
 
     $sms = "";
-    $result = "";
     $displayname = "";
     global $userdn;
     global $ldap_url;
@@ -337,7 +337,7 @@ function get_mobile_and_displayname($login) {
     # Connect to LDAP
     $ldap_connection = \Ltb\Ldap::connect($ldap_url, $ldap_starttls, $ldap_binddn, $ldap_bindpw, $ldap_network_timeout, $ldap_krb5ccname);
     $ldap = $ldap_connection[0];
-    $result = $ldap_connection[1];
+    $result = !($ldap_connection[1]) ? ResultCode::SUCCESS : ResultCode::from($ldap_connection[1]);
 
     if ($ldap) {
 
@@ -347,7 +347,7 @@ function get_mobile_and_displayname($login) {
 
         $errno = ldap_errno($ldap);
         if ($errno) {
-            $result = "ldaperror";
+            $result = ResultCode::LDAP_ERROR;
             error_log("LDAP - Search error $errno (".ldap_error($ldap).")");
         } else {
 
@@ -358,7 +358,7 @@ function get_mobile_and_displayname($login) {
                 $displayname = ldap_get_values($ldap, $entry, $ldap_fullname_attribute);
             }
             if (!$userdn) {
-                list($result, $token) = obscure_info_sendsms("smssent_ifexists","badcredentials");
+                list($result, $token) = obscure_info_sendsms(ResultCode::SMS_SENT_IF_EXISTS, ResultCode::BAD_CREDENTIALS);
                 error_log("LDAP - User $login not found");
             } else {
                 # Get first sms number for configured ldap attributes in sms_attributes.
@@ -373,7 +373,7 @@ function get_mobile_and_displayname($login) {
                         $sms = truncate_number($sms);
                     }
                 }else{
-                    list($result, $token) = obscure_info_sendsms("smssent_ifexists","smsnonumber");
+                    list($result, $token) = obscure_info_sendsms(ResultCode::SMS_SENT_IF_EXISTS, ResultCode::SMS_NO_NUMBER);
                     error_log("No SMS number found for user $login");
                 }
             }

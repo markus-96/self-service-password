@@ -21,11 +21,13 @@
 
 # This page is called to change sshPublicKey
 
+use Ssp\ResultCode\ResultCode;
+
 #==============================================================================
 # POST parameters
 #==============================================================================
 # Initiate vars
-$result = "";
+$result = ResultCode::SUCCESS;
 $login = $presetLogin;
 $password = "";
 $sshkey = "";
@@ -34,37 +36,37 @@ $userdn = "";
 $mail = "";
 
 if (isset($_POST["password"]) and $_POST["password"]) { $password = strval($_POST["password"]); }
-else { $result = "passwordrequired"; }
+else { $result = ResultCode::PASSWORD_REQUIRED; }
 if (isset($_POST["sshkey"]) and $_POST["sshkey"]) {
     $sshkey = strval($_POST["sshkey"]);
-    if (! check_sshkey($sshkey, $ssh_valid_key_types)) { $result = "invalidsshkey"; }
-} else { $result = "sshkeyrequired"; }
+    if (! check_sshkey($sshkey, $ssh_valid_key_types)) { $result = ResultCode::INVALID_SSH_KEY; }
+} else { $result = ResultCode::SSHKEY_REQUIRED; }
 if (isset($_REQUEST["login"]) and $_REQUEST["login"]) { $login = strval($_REQUEST["login"]); }
-else { $result = "loginrequired"; }
+else { $result = ResultCode::LOGIN_REQUIRED; }
 if (! isset($_REQUEST["login"]) and ! isset($_POST["password"]) and ! isset($_POST["sshkey"])) {
-    $result = "emptysshkeychangeform";
+    $result = ResultCode::EMPTY_SSH_KEY_CHANGE_FORM;
 }
 
 # Check the entered username for characters that our installation doesn't support
-if ( $result === "" ) {
+if ( $result === ResultCode::SUCCESS ) {
     $result = check_username_validity($login,$login_forbidden_chars);
 }
 
 #==============================================================================
 # Check captcha
 #==============================================================================
-if ( ( $result === "" ) and $use_captcha) { $result = global_captcha_check();}
+if ( ( $result === ResultCode::SUCCESS ) and $use_captcha) { $result = global_captcha_check();}
 
 #==============================================================================
 # Check password
 #==============================================================================
-if ( $result === "" ) {
+if ( $result === ResultCode::SUCCESS ) {
 
     # Connect to LDAP
     $ldap_connection = \Ltb\Ldap::connect($ldap_url, $ldap_starttls, $ldap_binddn, $ldap_bindpw, $ldap_network_timeout, $ldap_krb5ccname);
 
     $ldap = $ldap_connection[0];
-    $result = $ldap_connection[1];
+    $result = !($ldap_connection[1]) ? ResultCode::SUCCESS : ResultCode::from($ldap_connection[1]);
 
     if ($ldap) {
 
@@ -74,7 +76,7 @@ if ( $result === "" ) {
 
         $errno = ldap_errno($ldap);
         if ( $errno ) {
-            $result = "ldaperror";
+            $result = ResultCode::LDAP_ERROR;
             error_log("LDAP - Search error $errno  (".ldap_error($ldap).")");
         } else {
 
@@ -82,7 +84,7 @@ if ( $result === "" ) {
             $entry = ldap_first_entry($ldap, $search);
 
             if ( !$entry ) {
-                $result = "badcredentials";
+                $result = ResultCode::BAD_CREDENTIALS;
                 error_log("LDAP - User $login not found");
             } else {
 
@@ -96,7 +98,7 @@ if ( $result === "" ) {
                 # Confirm user credentials are valid
                 $bind = ldap_bind($ldap, $userdn, $password);
                 if ( !$bind ) {
-                    $result = "badcredentials";
+                    $result = ResultCode::BAD_CREDENTIALS;
                     $errno = ldap_errno($ldap);
                     if ( $errno ) {
                         error_log("LDAP - Bind user error $errno  (".ldap_error($ldap).")");
@@ -113,7 +115,7 @@ if ( $result === "" ) {
 
         if ( $use_ratelimit ) {
             if ( ! allowed_rate($login,$_SERVER[$client_ip_header],$rrl_config) ) {
-                $result = "throttle";
+                $result = ResultCode::THROTTLE;
                 error_log("LDAP - User $login too fast");
             }
         }
@@ -124,14 +126,14 @@ if ( $result === "" ) {
 #==============================================================================
 # Change sshPublicKey
 #==============================================================================
-if ( !$result ) {
+if ( $result === ResultCode::SUCCESS ) {
     $result = change_sshkey($ldap, $userdn, $change_sshkey_objectClass, $change_sshkey_attribute, $sshkey);
 }
 
 #==============================================================================
 # Notify SSH Key change
 #==============================================================================
-if ($result === "sshkeychanged") {
+if ($result === ResultCode::SSH_KEY_CHANGED) {
     if ($mail and $notify_on_sshkey_change) {
         $data = array( "login" => $login, "mail" => $mail, "sshkey" => $sshkey);
         if (! send_mail($mailer, $mail, $mail_from, $mail_from_name, $messages["changesshkeysubject"], $messages["changesshkeymessage"].$mail_signature, $data)) {

@@ -22,14 +22,15 @@
 require_once(__DIR__."/../vendor/autoload.php");
 
 use Gregwar\Captcha\PhraseBuilder;
+use Ssp\ResultCode\ResultCode;
 
 function check_captcha( $captcha_value, $user_value ) {
     return PhraseBuilder::comparePhrases($captcha_value,$user_value);
 }
 
 # see ../htdocs/captcha.php where captcha cookie and $_SESSION['phrase'] are set.
-function global_captcha_check() {
-    $result="";
+function global_captcha_check(): ResultCode {
+    $result=ResultCode::SUCCESS;
     if (isset($_POST["captchaphrase"]) and $_POST["captchaphrase"]) {
         # captcha cookie for session
         ini_set("session.use_cookies",1);
@@ -39,14 +40,14 @@ function global_captcha_check() {
         session_start();
         $captchaphrase = strval($_POST["captchaphrase"]);
         if (!isset($_SESSION['phrase']) or !check_captcha($_SESSION['phrase'], $captchaphrase)) {
-            $result = "badcaptcha";
+            $result = ResultCode::BAD_CAPTCHA;
         }
         unset($_SESSION['phrase']);
         # write session to make sure captcha phrase is no more included in session.
         session_write_close();
     }
     else {
-        $result = "captcharequired";
+        $result = ResultCode::CAPTCHA_REQUIRED;
     }
     return $result;
 }

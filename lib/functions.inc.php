@@ -34,6 +34,7 @@
 
 require_once __DIR__ . '/../vendor/autoload.php';
 use ZxcvbnPhp\Zxcvbn;
+use Ssp\ResultCode\ResultCode;
 
 try{
   $zxcvbn = new Zxcvbn();
@@ -207,10 +208,10 @@ function get_fa_class( $msg) {
 # Check password strength
 # @param array entry_array ldap entry ( ie not resource or LDAP\Result )
 # @return result code
-function check_password_strength( $password, $oldpassword, $pwd_policy_config, $login, $entry_array ) {
+function check_password_strength( $password, $oldpassword, $pwd_policy_config, $login, $entry_array ): ResultCode {
     extract( $pwd_policy_config );
 
-    $result = "";
+    $result = ResultCode::SUCCESS;
 
     $length = strlen(utf8_decode($password));
     preg_match_all("/[a-z]/", $password, $lower_res);
@@ -243,51 +244,51 @@ function check_password_strength( $password, $oldpassword, $pwd_policy_config, $
         if ( $digit > 0 ) { $complex++; }
         if ( $lower > 0 ) { $complex++; }
         if ( $upper > 0 ) { $complex++; }
-        if ( $complex < $pwd_complexity ) { $result="notcomplex"; }
+        if ( $complex < $pwd_complexity ) { $result=ResultCode::NOT_COMPLEX; }
     }
 
     # Minimal lenght
-    if ( $pwd_min_length and $length < $pwd_min_length ) { $result="tooshort"; }
+    if ( $pwd_min_length and $length < $pwd_min_length ) { $result=ResultCode::TOO_SHORT; }
 
     # Maximal lenght
-    if ( $pwd_max_length and $length > $pwd_max_length ) { $result="toobig"; }
+    if ( $pwd_max_length and $length > $pwd_max_length ) { $result=ResultCode::TOO_BIG; }
 
     # Minimal lower chars
-    if ( $pwd_min_lower and $lower < $pwd_min_lower ) { $result="minlower"; }
+    if ( $pwd_min_lower and $lower < $pwd_min_lower ) { $result=ResultCode::MIN_LOWER; }
 
     # Minimal upper chars
-    if ( $pwd_min_upper and $upper < $pwd_min_upper ) { $result="minupper"; }
+    if ( $pwd_min_upper and $upper < $pwd_min_upper ) { $result=ResultCode::MIN_UPPER; }
 
     # Minimal digit chars
-    if ( $pwd_min_digit and $digit < $pwd_min_digit ) { $result="mindigit"; }
+    if ( $pwd_min_digit and $digit < $pwd_min_digit ) { $result=ResultCode::MIN_DIGIT; }
 
     # Minimal special chars
-    if ( $pwd_min_special and $special < $pwd_min_special ) { $result="minspecial"; }
+    if ( $pwd_min_special and $special < $pwd_min_special ) { $result=ResultCode::MIN_SPECIAL; }
 
     # Forbidden chars
-    if ( $forbidden > 0 ) { $result="forbiddenchars"; }
+    if ( $forbidden > 0 ) { $result=ResultCode::FORBIDDEN_CHARS; }
 
     # Special chars at beginning or end
-    if ( $special_at_ends > 0 && $special == 1 ) { $result="specialatends"; }
+    if ( $special_at_ends > 0 && $special == 1 ) { $result=ResultCode::SPECIAL_AT_ENDS; }
 
     # Same as old password?
-    if ( $pwd_no_reuse and $password === $oldpassword ) { $result="sameasold"; }
+    if ( $pwd_no_reuse and $password === $oldpassword ) { $result=ResultCode::SAME_AS_OLD; }
 
     # Same as login?
-    if ( $pwd_diff_login and $password === $login ) { $result="sameaslogin"; }
+    if ( $pwd_diff_login and $password === $login ) { $result=ResultCode::SAME_AS_LOGIN; }
 
     if ( $pwd_diff_last_min_chars > 0 and strlen($oldpassword) > 0 ) {
         $similarities = similar_text($oldpassword, $password);
         $check_len    = strlen($oldpassword) < strlen($password) ? strlen($oldpassword) : strlen($password);
         $new_chars    = $check_len - $similarities;
-        if ($new_chars <= $pwd_diff_last_min_chars) { $result = "diffminchars"; }
+        if ($new_chars <= $pwd_diff_last_min_chars) { $result = ResultCode::DIFF_MIN_CHARS; }
     }
 
     # Contains forbidden words?
     if ( !empty($pwd_forbidden_words) ) {
         foreach( $pwd_forbidden_words as $disallowed ) {
             if( stripos($password, $disallowed) !== false ) {
-                $result="forbiddenwords";
+                $result=ResultCode::FORBIDDEN_WORDS;
                 break;
             }
         }
@@ -308,7 +309,7 @@ function check_password_strength( $password, $oldpassword, $pwd_policy_config, $
                         continue;
                     }
                     if (stripos($password, $value) !== false) {
-                        $result = "forbiddenldapfields";
+                        $result = ResultCode::FORBIDDEN_LDAP_FIELDS;
                         break 2;
                     }
                 }
@@ -320,7 +321,7 @@ function check_password_strength( $password, $oldpassword, $pwd_policy_config, $
     if ($use_pwnedpasswords and version_compare(PHP_VERSION, '7.2.5') >= 0) {
         $pwned_passwords = new PwnedPasswords\PwnedPasswords;
         $insecure = $pwned_passwords->isPwned($password);
-        if ($insecure) { $result="pwned"; }
+        if ($insecure) { $result=ResultCode::PWNED; }
     }
 
 
@@ -344,13 +345,13 @@ function check_password_strength( $password, $oldpassword, $pwd_policy_config, $
             else
             {
                 error_log("checkEntropy: insufficient entropy: level = $entropy_level but minimal required = $pwd_min_entropy");
-                $result="insufficiententropy";
+                $result=ResultCode::INSUFFICIENT_ENTROPY;
             }
         }
         else
         {
             error_log("checkEntropy: missing required parameter pwd_min_entropy");
-            $result="insufficiententropy";
+            $result=ResultCode::INSUFFICIENT_ENTROPY;
         }
 
     }
@@ -360,9 +361,9 @@ function check_password_strength( $password, $oldpassword, $pwd_policy_config, $
 
 # Change password
 # @return result code
-function change_password( $ldap, $dn, $password, $ad_mode, $ad_options, $samba_mode, $samba_options, $shadow_options, $hash, $hash_options, $who_change_password, $oldpassword, $use_exop_passwd, $use_ppolicy_control ) {
+function change_password( $ldap, $dn, $password, $ad_mode, $ad_options, $samba_mode, $samba_options, $shadow_options, $hash, $hash_options, $who_change_password, $oldpassword, $use_exop_passwd, $use_ppolicy_control ): ResultCode {
 
-    $result = "";
+    $result = ResultCode::SUCCESS;
     $error_code = "";
     $error_msg = "";
     $ppolicy_error_code = "";
@@ -542,16 +543,15 @@ function change_password( $ldap, $dn, $password, $ad_mode, $ad_options, $samba_m
     }
 
     if ( !isset($error_code) ) {
-        $result = "ldaperror";
+        $result = ResultCode::LDAP_ERROR;
     } elseif ( $error_code > 0 ) {
-        $result = "passworderror";
-        error_log("LDAP - Modify password error $error_code ($error_msg)");
-        if ( $ppolicy_error_code === 5 ) { $result = "badquality"; }
-        if ( $ppolicy_error_code === 6 ) { $result = "tooshort"; }
-        if ( $ppolicy_error_code === 7 ) { $result = "tooyoung"; }
-        if ( $ppolicy_error_code === 8 ) { $result = "inhistory"; }
+        $result = ResultCode::PASSWORD_ERROR;
+        if ( $ppolicy_error_code === 5 ) { $result = ResultCode::BAD_QUALITY; }
+        if ( $ppolicy_error_code === 6 ) { $result = ResultCode::TOO_SHORT; }
+        if ( $ppolicy_error_code === 7 ) { $result = ResultCode::TOO_YOUNG; }
+        if ( $ppolicy_error_code === 8 ) { $result = ResultCode::IN_HISTORY; }
     } else {
-        $result = "passwordchanged";
+        $result = ResultCode::PASSWORD_CHANGED;
     }
 
     return $result;
@@ -608,7 +608,7 @@ function check_sshkey ( $sshkey, $valid_types ) {
 # @return result code
 function change_sshkey( $ldap, $dn, $objectClass, $attribute, $sshkey ) {
 
-    $result = "";
+    $result = ResultCode::SUCCESS;
     $keys = preg_split('/\n|\r\n?/', $sshkey);
     $userdata[$attribute] = $keys[0];
 
@@ -619,7 +619,7 @@ function change_sshkey( $ldap, $dn, $objectClass, $attribute, $sshkey ) {
 
         $errno = ldap_errno($ldap);
         if ( $errno ) {
-            $result = "ldaperror";
+            $result = ResultCode::LDAP_ERROR;
             error_log("LDAP - Search error $errno (".ldap_error($ldap).")");
         } else {
 
@@ -645,7 +645,7 @@ function change_sshkey( $ldap, $dn, $objectClass, $attribute, $sshkey ) {
     $errno = ldap_errno($ldap);
 
     if ( $errno ) {
-        $result = "sshkeyerror";
+        $result = ResultCode::SSH_KEY_ERROR;
         error_log("LDAP - Modify $attribute error $errno (".ldap_error($ldap).")");
     } else {
         for ($c = 1; $c < count($keys); $c++) {
@@ -656,13 +656,13 @@ function change_sshkey( $ldap, $dn, $objectClass, $attribute, $sshkey ) {
             $add = ldap_mod_add($ldap, $dn, $userdata);
             $errno = ldap_errno($ldap);
             if ( $errno ) {
-                $result = "sshkeyerror";
+                $result = ResultCode::SSH_KEY_ERROR;
                 error_log("LDAP - Modify $attribute error $errno (".ldap_error($ldap).")");
                 break;
             }
         }
-        if ($result === "") {
-            $result = "sshkeychanged";
+        if ($result === ResultCode::SUCCESS) {
+            $result = ResultCode::SSH_KEY_CHANGED;
         }
     }
 
@@ -775,18 +775,18 @@ function send_mail($mailer, $mail, $mail_from, $mail_from_name, $subject, $body,
  * @param optional login_forbidden_chars invalid characters
  * @return $result
  */
-function check_username_validity($username,$login_forbidden_chars) {
-    $result = "";
+function check_username_validity($username,$login_forbidden_chars): ResultCode {
+    $result = ResultCode::SUCCESS;
 
     if (!$login_forbidden_chars) {
         if (!ctype_alnum($username)) {
-            $result = "badcredentials";
+            $result = ResultCode::BAD_CREDENTIALS;
             error_log("Non alphanumeric characters in username $username");
         }
     } else {
         preg_match_all("/[$login_forbidden_chars]/", $username, $forbidden_res);
         if (count($forbidden_res[0])) {
-            $result = "badcredentials";
+            $result = ResultCode::BAD_CREDENTIALS;
             error_log("Illegal characters in username $username (list of forbidden characters: $login_forbidden_chars)");
         }
     }

@@ -21,11 +21,12 @@
 
 # This page is called to change password
 
+use Ssp\ResultCode\ResultCode;
 #==============================================================================
 # POST parameters
 #==============================================================================
 # Initiate vars
-$result = "";
+$result = ResultCode::SUCCESS;
 $login = $presetLogin;
 $confirmpassword = "";
 $newpassword = "";
@@ -37,40 +38,40 @@ $mail = "";
 $extended_error_msg = "";
 
 if (isset($_POST["confirmpassword"]) and $_POST["confirmpassword"]) { $confirmpassword = strval($_POST["confirmpassword"]); }
-else { $result = "confirmpasswordrequired"; }
+else { $result = ResultCode::CONFIRM_PASSWORD_REQUIRED; }
 if (isset($_POST["newpassword"]) and $_POST["newpassword"]) { $newpassword = strval($_POST["newpassword"]); }
-else { $result = "newpasswordrequired"; }
+else { $result = ResultCode::NEW_PASSWORD_REQUIRED; }
 if (isset($_POST["oldpassword"]) and $_POST["oldpassword"]) { $oldpassword = strval($_POST["oldpassword"]); }
-else { $result = "oldpasswordrequired"; }
+else { $result = ResultCode::OLD_PASSWORD_REQUIRED; }
 if (isset($_REQUEST["login"]) and $_REQUEST["login"]) { $login = strval($_REQUEST["login"]); }
-else { $result = "loginrequired"; }
+else { $result = ResultCode::LOGIN_REQUIRED; }
 if (! isset($_REQUEST["login"]) and ! isset($_POST["confirmpassword"]) and ! isset($_POST["newpassword"]) and ! isset($_POST["oldpassword"])) {
-    $result = "emptychangeform";
+    $result = ResultCode::EMPTY_CHANGE_FORM;
 }
 
 # Check the entered username for characters that our installation doesn't support
-if ( $result === "" ) {
+if ( $result === ResultCode::SUCCESS ) {
     $result = check_username_validity($login,$login_forbidden_chars);
 }
 
 # Match new and confirm password
-if ( $newpassword != $confirmpassword ) { $result="nomatch"; }
+if ( $newpassword != $confirmpassword ) { $result=ResultCode::NO_MATCH; }
 
 #==============================================================================
 # Check captcha
 #==============================================================================
-if ( ( $result === "" ) and $use_captcha) { $result = global_captcha_check();}
+if ( ( $result === ResultCode::SUCCESS ) and $use_captcha) { $result = global_captcha_check();}
 
 #==============================================================================
 # Check old password
 #==============================================================================
-if ( $result === "" ) {
+if ( $result === ResultCode::SUCCESS ) {
 
     # Connect to LDAP
     $ldap_connection = \Ltb\Ldap::connect($ldap_url, $ldap_starttls, $ldap_binddn, $ldap_bindpw, $ldap_network_timeout, $ldap_krb5ccname);
 
     $ldap = $ldap_connection[0];
-    $result = $ldap_connection[1];
+    $result = !($ldap_connection[1]) ? ResultCode::SUCCESS : ResultCode::from($ldap_connection[1]);
 
     if ($ldap) {
 
@@ -80,7 +81,7 @@ if ( $result === "" ) {
 
         $errno = ldap_errno($ldap);
         if ( $errno ) {
-            $result = "ldaperror";
+            $result = ResultCode::LDAP_ERROR;
             error_log("LDAP - Search error $errno  (".ldap_error($ldap).")");
         } else {
 
@@ -88,7 +89,7 @@ if ( $result === "" ) {
             $entry = ldap_first_entry($ldap, $search);
 
             if( !$entry ) {
-                $result = "badcredentials";
+                $result = ResultCode::BAD_CREDENTIALS;
                 error_log("LDAP - User $login not found");
             } else {
                 # Get user email for notification
@@ -113,7 +114,7 @@ if ( $result === "" ) {
                 # Bind with old password
                 $bind = ldap_bind($ldap, $userdn, $oldpassword);
                 if ( !$bind ) {
-                    $result = "badcredentials";
+                    $result = ResultCode::BAD_CREDENTIALS;
                     $errno = ldap_errno($ldap);
                     if ( $errno ) {
                         error_log("LDAP - Bind user error $errno  (".ldap_error($ldap).")");
@@ -125,18 +126,18 @@ if ( $result === "" ) {
                             if ( strpos($extended_error[2], '773') or strpos($extended_error[0], 'NT_STATUS_PASSWORD_MUST_CHANGE') ) {
                                 error_log("LDAP - Bind user password needs to be changed");
                                 $who_change_password = "manager";
-                                $result = "";
+                                $result = ResultCode::SUCCESS;
                             }
                             if ( ( strpos($extended_error[2], '532') or strpos($extended_error[0], 'NT_STATUS_ACCOUNT_EXPIRED') ) and $ad_options['change_expired_password'] ) {
                                 error_log("LDAP - Bind user password is expired");
                                 $who_change_password = "manager";
-                                $result = "";
+                                $result = ResultCode::SUCCESS;
                             }
                             unset($extended_error);
                         }
                     }
                 }
-                if ( !$result )  {
+                if ( $result !== ResultCode::SUCCESS )  {
                     # Rebind as Manager if needed
                     if ( $who_change_password == "manager" ) {
                         $bind = ldap_bind($ldap, $ldap_binddn, $ldap_bindpw);
@@ -146,7 +147,7 @@ if ( $result === "" ) {
 
             if ( $use_ratelimit ) {
                 if ( ! allowed_rate($login,$_SERVER[$client_ip_header],$rrl_config) ) {
-                    $result = "throttle";
+                    $result = ResultCode::THROTTLE;
                     error_log("LDAP - User $login too fast");
                 }
             }
@@ -158,25 +159,25 @@ if ( $result === "" ) {
 #==============================================================================
 # Check password strength
 #==============================================================================
-if ( !$result ) {
+if ( $result == ResultCode::SUCCESS ) {
     $result = check_password_strength( $newpassword, $oldpassword, $pwd_policy_config, $login, $entry_array );
 }
 
 #==============================================================================
 # Change password
 #==============================================================================
-if ( !$result ) {
+if ( $result == ResultCode::SUCCESS ) {
     if ( isset($prehook) ) {
         $command = hook_command($prehook, $login, $newpassword, $oldpassword, $prehook_password_encodebase64);
         exec($command, $prehook_output, $prehook_return);
     }
     if ( ! isset($prehook_return) || $prehook_return === 0 || $ignore_prehook_error ) {
         $result = change_password($ldap, $userdn, $newpassword, $ad_mode, $ad_options, $samba_mode, $samba_options, $shadow_options, $hash, $hash_options, $who_change_password, $oldpassword, $ldap_use_exop_passwd, $ldap_use_ppolicy_control);
-        if ( $result === "passwordchanged" && isset($posthook) ) {
+        if ( $result === ResultCode::PASSWORD_CHANGED && isset($posthook) ) {
             $command = hook_command($posthook, $login, $newpassword, $oldpassword, $posthook_password_encodebase64);
             exec($command, $posthook_output, $posthook_return);
         }
-        if ( $result !== "passwordchanged" ) {
+        if ( $result !== ResultCode::PASSWORD_CHANGED ) {
             if ( $show_extended_error ) {
                 ldap_get_option($ldap, 0x0032, $extended_error_msg);
             }
@@ -187,7 +188,7 @@ if ( !$result ) {
 #==============================================================================
 # Notify password change
 #==============================================================================
-if ($result === "passwordchanged") {
+if ($result === ResultCode::PASSWORD_CHANGED) {
     if ($mail and $notify_on_change) {
         $data = array( "login" => $login, "mail" => $mail, "password" => $newpassword);
         if ( !send_mail($mailer, $mail, $mail_from, $mail_from_name, $messages["changesubject"], $messages["changemessage"].$mail_signature, $data) ) {

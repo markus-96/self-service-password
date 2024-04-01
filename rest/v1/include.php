@@ -5,6 +5,7 @@
 #==============================================================================
 require_once("../../conf/config.inc.php");
 
+use Ssp\ResultCode\ResultCode;
 #==============================================================================
 # Includes
 #==============================================================================
@@ -21,22 +22,12 @@ else { $source="unknown"; }
 #==============================================================================
 # Language
 #==============================================================================
-require_once("../../lib/detectbrowserlanguage.php");
+
+use Ssp\Lang\Languages;
 # Available languages
-$languages = array();
-if ($handle = opendir('../../lang')) {
-    while (false !== ($entry = readdir($handle))) {
-        if ($entry != "." && $entry != "..") {
-             array_push($languages, str_replace(".inc.php", "", $entry));
-        }
-    }
-    closedir($handle);
-}
-$lang = detectLanguage($lang, $languages);
-require_once("../../lang/$lang.inc.php");
-if (file_exists("../../conf/$lang.inc.php")) {
-    require_once("../../conf/$lang.inc.php");
-}
+$accepted_lang = filter_input(INPUT_SERVER, 'HTTP_ACCEPT_LANGUAGE', FILTER_SANITIZE_STRING);
+$lang = Languages::detectLanguage($lang, $allowed_lang, $accepted_lang);
+$lang_class = Languages::get_language_class($lang);
 
 #==============================================================================
 # PHP modules
@@ -45,25 +36,25 @@ if (file_exists("../../conf/$lang.inc.php")) {
 $dependency_check_results = array();
 
 # Check PHP-LDAP presence
-if ( ! function_exists('ldap_connect') ) { $dependency_check_results[] = "nophpldap"; }
+if ( ! function_exists('ldap_connect') ) { $dependency_check_results[] = ResultCode::NO_PHP_LDAP; }
 else {
     # Check ldap_modify_batch presence if AD mode and password change as user
-    if ( $ad_mode and $who_change_password === "user" and ! function_exists('ldap_modify_batch') ) { $dependency_check_results[] = "phpupgraderequired"; }
+    if ( $ad_mode and $who_change_password === "user" and ! function_exists('ldap_modify_batch') ) { $dependency_check_results[] = ResultCode::PHP_UPGRADE_REQUIRED; }
     # Check ldap_exop_passwd if LDAP exop password modify enabled
-    if ( $ldap_use_exop_passwd and ! function_exists('ldap_exop_passwd') ) { $dependency_check_results[] = "phpupgraderequired"; }
+    if ( $ldap_use_exop_passwd and ! function_exists('ldap_exop_passwd') ) { $dependency_check_results[] = ResultCode::PHP_UPGRADE_REQUIRED; }
 }
 
 # Check PHP mhash presence if Samba mode active
-if ( $samba_mode and ! function_exists('hash') and ! function_exists('mhash') ) { $dependency_check_results[] = "nophpmhash"; }
+if ( $samba_mode and ! function_exists('hash') and ! function_exists('mhash') ) { $dependency_check_results[] = ResultCode::NO_PHP_MHASH; }
 
 # Check PHP mbstring presence
-if ( ! function_exists('mb_internal_encoding') ) { $dependency_check_results[] = "nophpmbstring"; }
+if ( ! function_exists('mb_internal_encoding') ) { $dependency_check_results[] = ResultCode::NO_PHP_MBSTRING; }
 
 # Check PHP xml presence
-if ( ! function_exists('utf8_decode') ) { $dependency_check_results[] = "nophpxml"; }
+if ( ! function_exists('utf8_decode') ) { $dependency_check_results[] = ResultCode::NO_PHP_XML; }
 
 # Check keyphrase setting
-if ( ( ( $use_tokens and $crypt_tokens ) or $use_sms or $crypt_answers ) and ( empty($keyphrase) or $keyphrase == "secret") ) { $dependency_check_results[] = "nokeyphrase"; }
+if ( ( ( $use_tokens and $crypt_tokens ) or $use_sms or $crypt_answers ) and ( empty($keyphrase) or $keyphrase == "secret") ) { $dependency_check_results[] = ResultCode::NO_KEY_PHRASE; }
 
 
 #==============================================================================

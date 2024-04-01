@@ -21,11 +21,12 @@
 
 # This page is called to set value for an LDAP attribute
 
+use Ssp\ResultCode\ResultCode;
 #==============================================================================
 # POST parameters
 #==============================================================================
 # Initiate vars
-$result = "";
+$result = ResultCode::SUCCESS;
 $login = $presetLogin;
 $password = "";
 $ldap = "";
@@ -37,32 +38,32 @@ $phone ="";
 if (isset($_POST["mail"]) and $_POST["mail"]) { $mail = strval($_POST["mail"]); }
 if (isset($_POST["phone"]) and $_POST["phone"]) { $phone = strval($_POST["phone"]); }
 if (isset($_REQUEST["login"]) and $_REQUEST["login"]) { $login = strval($_REQUEST["login"]); }
- else { $result = "loginrequired"; }
+ else { $result = ResultCode::LOGIN_REQUIRED; }
 if (isset($_POST["password"]) and $_POST["password"]) { $password = strval($_POST["password"]); }
- else { $result = "passwordrequired"; }
+ else { $result = ResultCode::PASSWORD_REQUIRED; }
 if (! isset($_POST["password"]) and ! isset($_REQUEST["login"]))
- { $result = "emptyattributesform"; }
+ { $result = ResultCode::EMPTY_ATTRIBUTES_FORM; }
 
 # Check the entered username for characters that our installation doesn't support
-if ( $result === "" ) {
+if ( $result === ResultCode::SUCCESS ) {
     $result = check_username_validity($login,$login_forbidden_chars);
 }
 
 #==============================================================================
 # Check captcha
 #==============================================================================
-if ( ( $result === "" ) and $use_captcha) { $result = global_captcha_check();}
+if ( ( $result === ResultCode::SUCCESS ) and $use_captcha) { $result = global_captcha_check();}
 
 #==============================================================================
 # Check password
 #==============================================================================
-if ( $result === "" ) {
+if ( $result === ResultCode::SUCCESS ) {
 
     # Connect to LDAP
     $ldap_connection = \Ltb\Ldap::connect($ldap_url, $ldap_starttls, $ldap_binddn, $ldap_bindpw, $ldap_network_timeout, $ldap_krb5ccname);
 
     $ldap = $ldap_connection[0];
-    $result = $ldap_connection[1];
+    $result = !($ldap_connection[1]) ? ResultCode::SUCCESS : ResultCode::from($ldap_connection[1]);
 
     if ($ldap) {
 
@@ -72,7 +73,7 @@ if ( $result === "" ) {
 
     $errno = ldap_errno($ldap);
     if ( $errno ) {
-        $result = "ldaperror";
+        $result = ResultCode::LDAP_ERROR;
         error_log("LDAP - Search error $errno (".ldap_error($ldap).")");
     } else {
 
@@ -80,7 +81,7 @@ if ( $result === "" ) {
     $entry = ldap_first_entry($ldap, $search);
 
     if( !$entry ) {
-        $result = "badcredentials";
+        $result = ResultCode::BAD_CREDENTIALS;
         error_log("LDAP - User $login not found");
     } else {
 
@@ -89,7 +90,7 @@ if ( $result === "" ) {
     # Bind with password
     $bind = ldap_bind($ldap, $userdn, $password);
     if ( !$bind ) {
-        $result = "badcredentials";
+        $result = ResultCode::BAD_CREDENTIALS;
         $errno = ldap_errno($ldap);
         if ( $errno ) {
             error_log("LDAP - Bind user error $errno (".ldap_error($ldap).")");
@@ -99,7 +100,7 @@ if ( $result === "" ) {
 #==============================================================================
 # Register attributes
 #==============================================================================
-if ( !$result ) {
+if ( $result === ResultCode::SUCCESS ) {
 
     # Rebind as Manager if needed
     if ( $who_change_attributes == "manager" ) {
@@ -118,10 +119,10 @@ if ( !$result ) {
 
     $errno = ldap_errno($ldap);
     if ( $errno ) {
-        $result = "attributesmoderror";
+        $result = ResultCode::ATTRIBUTES_MOD_ERROR;
         error_log("LDAP - Modify attributes (error $errno (".ldap_error($ldap).")");
     } else {
-        $result = "attributeschanged";
+        $result = ResultCode::ATTRIBUTES_CHANGED;
     }
 
 }

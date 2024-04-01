@@ -1,4 +1,9 @@
 {
+    "autoload": {
+        "psr-4": {
+            "Ssp\\": "lib/"
+        }
+    },
     "require": {
         "ltb-project/ldap": "v0.1.0",
         "bjeavons/zxcvbn-php": "^1.0",

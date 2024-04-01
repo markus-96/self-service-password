@@ -21,11 +21,12 @@
 
 # This page is called to send a reset token by mail
 
+use Ssp\ResultCode\ResultCode;
 #==============================================================================
 # POST parameters
 #==============================================================================
 # Initiate vars
-$result = "";
+$result = ResultCode::SUCCESS;
 $login = $presetLogin;
 $mail = "";
 $ldap = "";
@@ -39,39 +40,39 @@ if (!$mail_address_use_ldap) {
         $usermail = strval($_POST["mail"]);
     } elseif (isset($_GET["usermail"]) and $_GET["usermail"]) {
         $usermail = strval($_GET["usermail"]);
-        $result = "checkdatabeforesubmit";
+        $result = ResultCode::CHECK_DATA_BEFORE_SUBMIT;
     } else {
-        $result = "mailrequired";
+        $result = ResultCode::MAIL_REQUIRED;
     }
 }
 
 if (isset($_REQUEST["login"]) and $_REQUEST["login"]) { $login = strval($_REQUEST["login"]);}
-else { $result = "loginrequired";}
+else { $result = ResultCode::LOGIN_REQUIRED;}
 
-if (! isset($_POST["mail"]) and ! isset($_REQUEST["login"])) { $result = "emptysendtokenform"; }
+if (! isset($_POST["mail"]) and ! isset($_REQUEST["login"])) { $result = ResultCode::EMPTY_SEND_TOKEN_FORM; }
 
 # Check the entered username for characters that our installation doesn't support
-if ( $result === "" ) {
+if ( $result === ResultCode::SUCCESS ) {
     $result = check_username_validity($login,$login_forbidden_chars);
 }
 
 #==============================================================================
 # Check captcha
 #==============================================================================
-if ( ( $result === "" ) and $use_captcha) {
+if ( ( $result === ResultCode::SUCCESS ) and $use_captcha) {
     $result = global_captcha_check();
 }
 
 #==============================================================================
 # Check mail
 #==============================================================================
-if ( $result === "" ) {
+if ( $result === ResultCode::SUCCESS ) {
 
     # Connect to LDAP
     $ldap_connection = \Ltb\Ldap::connect($ldap_url, $ldap_starttls, $ldap_binddn, $ldap_bindpw, $ldap_network_timeout, $ldap_krb5ccname);
 
     $ldap = $ldap_connection[0];
-    $result = $ldap_connection[1];
+    $result = !($ldap_connection[1]) ? ResultCode::SUCCESS : ResultCode::from($ldap_connection[1]);
 
     if ( $ldap ) {
 
@@ -81,7 +82,7 @@ if ( $result === "" ) {
 
         $errno = ldap_errno($ldap);
         if ( $errno ) {
-            $result = "ldaperror";
+            $result = ResultCode::LDAP_ERROR;
             error_log("LDAP - Search error $errno (".ldap_error($ldap).")");
         } else {
 
@@ -89,7 +90,7 @@ if ( $result === "" ) {
             $entry = ldap_first_entry($ldap, $search);
 
             if( !$entry ) {
-                $result = $obscure_usernotfound_sendtoken ? "tokensent_ifexists" : "badcredentials";
+                $result = $obscure_usernotfound_sendtoken ? ResultCode::TOKEN_SENT_IF_EXISTS : ResultCode::BAD_CREDENTIALS;
                 error_log("LDAP - User $login not found");
             } else {
 
@@ -128,16 +129,16 @@ if ( $result === "" ) {
 
                 if (! $match) {
                     if (! $mail_address_use_ldap) {
-                        $result = $obscure_usernotfound_sendtoken ? "tokensent_ifexists" : "mailnomatch";
+                        $result = $obscure_usernotfound_sendtoken ? ResultCode::TOKEN_SENT_IF_EXISTS : ResultCode::MAIL_NO_MATCH;
                         error_log("Mail $mail does not match for user $login");
                     } else {
-                        $result = $obscure_usernotfound_sendtoken ? "tokensent_ifexists" : "mailnomatch";
+                        $result = $obscure_usernotfound_sendtoken ? ResultCode::TOKEN_SENT_IF_EXISTS : ResultCode::MAIL_NO_MATCH;
                         error_log("Mail not found for user $login");
                     }
                 }
                 if ($use_ratelimit) {
                     if (! allowed_rate($login, $_SERVER[$client_ip_header], $rrl_config)) {
-                        $result = "throttle";
+                        $result = ResultCode::THROTTLE;
                         error_log("Mail - User $login too fast");
                     }
                 }
@@ -150,7 +151,7 @@ if ( $result === "" ) {
 #==============================================================================
 # Build and store token
 #==============================================================================
-if ( !$result ) {
+if ( $result === ResultCode::SUCCESS ) {
 
     # Use PHP session to register token
     # We do not generate cookie
@@ -173,7 +174,7 @@ if ( !$result ) {
 #==============================================================================
 # Send token by mail
 #==============================================================================
-if ( !$result ) {
+if ( $result === ResultCode::SUCCESS ) {
 
     $reset_url .= "?action=resetbytoken&token=".urlencode($token);
 
@@ -187,9 +188,9 @@ if ( !$result ) {
 
     # Send message
     if ( send_mail($mailer, $mail, $mail_from, $mail_from_name, $messages["resetsubject"], $messages["resetmessage"].$mail_signature, $data) ) {
-        $result = $obscure_usernotfound_sendtoken ? "tokensent_ifexists" : "tokensent";
+        $result = $obscure_usernotfound_sendtoken ? ResultCode::TOKEN_SENT_IF_EXISTS : ResultCode::TOKEN_SENT;
     } else {
-        $result = "tokennotsent";
+        $result = ResultCode::TOKEN_NOT_SEND;
         error_log("Error while sending token to $mail (user $login)");
     }
 }

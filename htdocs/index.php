@@ -1,5 +1,5 @@
 <?php
-
+$cur = microtime();
 #==============================================================================
 # Version
 #==============================================================================
@@ -29,60 +29,58 @@ else { $source="unknown"; }
 #==============================================================================
 # Language
 #==============================================================================
-require_once("../lib/detectbrowserlanguage.php");
+use Ssp\Lang\Languages;
 # Available languages
-$files = glob("../lang/*.php");
-$languages = str_replace(".inc.php", "", $files);
-$languages = str_replace("../lang/", "", $languages);
-$lang = detectLanguage($lang, array_intersect($languages,$allowed_lang));
-require_once("../lang/$lang.inc.php");
+$accepted_lang = filter_input(INPUT_SERVER, 'HTTP_ACCEPT_LANGUAGE', FILTER_SANITIZE_STRING);
+$lang = Languages::detectLanguage($lang, $allowed_lang, $accepted_lang);
+$lang_class = Languages::get_language_class($lang);
 
 # Remove default questions
 if (!$questions_use_default) {
-    unset($messages['questions']['birthday']);
-    unset($messages['questions']['color']);
+    $lang_class->unset_default_questions();
 }
 
-if (file_exists("../conf/$lang.inc.php")) {
-    require_once("../conf/$lang.inc.php");
+if (isset($messages['questions'])) {
+    $lang_class->update_questions($messages['questions']);
 }
-
 #==============================================================================
 # PHP modules
 #==============================================================================
 # Init dependency check results variable
 $dependency_check_results = array();
 
+use Ssp\ResultCode\ResultCode;
+
 # Check PHP-LDAP presence
-if ( ! function_exists('ldap_connect') ) { $dependency_check_results[] = "nophpldap"; }
+if ( ! function_exists('ldap_connect') ) { $dependency_check_results[] = ResultCode::NO_PHP_LDAP; }
 else {
     # Check ldap_modify_batch presence if AD mode and password change as user
-    if ( $ad_mode and $who_change_password === "user" and ! function_exists('ldap_modify_batch') ) { $dependency_check_results[] = "phpupgraderequired"; }
+    if ( $ad_mode and $who_change_password === "user" and ! function_exists('ldap_modify_batch') ) { $dependency_check_results[] = ResultCode::PHP_UPGRADE_REQUIRED; }
     # Check ldap_exop_passwd if LDAP exop password modify enabled
-    if ( $ldap_use_exop_passwd and ! function_exists('ldap_exop_passwd') ) { $dependency_check_results[] = "phpupgraderequired"; }
+    if ( $ldap_use_exop_passwd and ! function_exists('ldap_exop_passwd') ) { $dependency_check_results[] = ResultCode::PHP_UPGRADE_REQUIRED; }
     # Check LDAP_CONTROL_PASSWORDPOLICYREQUEST if LDAP ppolicy control enabled
-    if ( $ldap_use_ppolicy_control and ! defined('LDAP_CONTROL_PASSWORDPOLICYREQUEST') ) { $dependency_check_results[] = "phpupgraderequired"; }
+    if ( $ldap_use_ppolicy_control and ! defined('LDAP_CONTROL_PASSWORDPOLICYREQUEST') ) { $dependency_check_results[] = ResultCode::PHP_UPGRADE_REQUIRED; }
     # Check PHP Version is at least 7.2.5, when pwnedpasswords is enabled
-    if ($use_pwnedpasswords and version_compare(PHP_VERSION, '7.2.5') < 0) { $dependency_check_results[] = "phpupgraderequired"; }
+    if ($use_pwnedpasswords and version_compare(PHP_VERSION, '7.2.5') < 0) { $dependency_check_results[] = ResultCode::PHP_UPGRADE_REQUIRED; }
 }
 
 # Check PHP mhash presence if Samba mode active
-if ( $samba_mode and ! function_exists('hash') and ! function_exists('mhash') ) { $dependency_check_results[] = "nophpmhash"; }
+if ( $samba_mode and ! function_exists('hash') and ! function_exists('mhash') ) { $dependency_check_results[] = ResultCode::NO_PHP_MHASH; }
 
 # Check PHP mbstring presence
-if ( ! function_exists('mb_internal_encoding') ) { $dependency_check_results[] = "nophpmbstring"; }
+if ( ! function_exists('mb_internal_encoding') ) { $dependency_check_results[] = ResultCode::NO_PHP_MBSTRING; }
 
 # Check PHP xml presence
-if ( ! function_exists('utf8_decode') ) { $dependency_check_results[] = "nophpxml"; }
+if ( ! function_exists('utf8_decode') ) { $dependency_check_results[] = ResultCode::NO_PHP_XML; }
 
 # Check crypt_tokens option
-if ( $use_sms and !$crypt_tokens ) { $dependency_check_results[] = "nocrypttokens"; }
+if ( $use_sms and !$crypt_tokens ) { $dependency_check_results[] = ResultCode::NO_CRYPT_TOKENS; }
 
 # Check keyphrase setting
-if ( ( ( $use_tokens and $crypt_tokens ) or $use_sms or $crypt_answers ) and ( empty($keyphrase) or $keyphrase == "secret") ) { $dependency_check_results[] = "nokeyphrase"; }
+if ( ( ( $use_tokens and $crypt_tokens ) or $use_sms or $crypt_answers ) and ( empty($keyphrase) or $keyphrase == "secret") ) { $dependency_check_results[] = ResultCode::NO_KEY_PHRASE; }
 
 # Check reset_url setting
-if ( $use_tokens and empty($reset_url) ) { $dependency_check_results[] = "noreseturl"; }
+if ( $use_tokens and empty($reset_url) ) { $dependency_check_results[] = ResultCode::NO_RESET_URL; }
 
 #==============================================================================
 # Email Config
@@ -161,7 +159,7 @@ if (isset($_REQUEST["login_hint"]) and $_REQUEST["login_hint"]) { $presetLogin =
 #==============================================================================
 # Route to action
 #==============================================================================
-$result = "";
+$result = ResultCode::SUCCESS;
 $action = "change";
 if (isset($default_action)) { $action = $default_action; }
 if (isset($_GET["action"]) and $_GET['action']) { $action = $_GET["action"]; }
@@ -184,15 +182,15 @@ if (file_exists($action.".php")) { require_once($action.".php"); }
 #==============================================================================
 # Audit
 #==============================================================================
-if ($audit_log_file and !preg_match("/empty.*form/", $result)) {
+if ($audit_log_file and !preg_match("/empty.*form/", $result->value)) {
     require_once("../lib/audit.inc.php");
-    auditlog($audit_log_file, $userdn, $login, $action, $result);
+    auditlog($audit_log_file, $userdn, $login, $action, $result->value);
 }
 
 #==============================================================================
 # Smarty
 #==============================================================================
-require_once(SMARTY);
+include_once(SMARTY);
 
 $compile_dir = isset($smarty_compile_dir) ? $smarty_compile_dir : "../templates_c/";
 $cache_dir = isset($smarty_cache_dir) ? $smarty_cache_dir : "../cache/";
@@ -311,10 +309,8 @@ if (isset($use_attributes) && $use_attributes && isset($attribute_mail)) { $smar
 if (isset($use_attributes) && $use_attributes && isset($attribute_phone)) { $smarty->assign('attribute_phone_update', true); }
 
 # Assign messages
-$smarty->assign('lang',$lang);
-foreach ($messages as $key => $message) {
-    $smarty->assign('msg_'.$key,$message);
-}
+$lang_class->update_messages($messages);
+$lang_class->assign_smarty_messages($smarty);
 
 
 $smarty->assign('action', $action);
@@ -328,34 +324,29 @@ if (isset($usermail)) { $smarty->assign('usermail', $usermail); }
 if (isset($displayname[0])) { $smarty->assign('displayname', $displayname[0]); }
 if (isset($encrypted_sms_login)) { $smarty->assign('encrypted_sms_login', $encrypted_sms_login); }
 
-if (isset($obscure_failure_messages) && in_array($result, $obscure_failure_messages) ) { $result = "badcredentials"; }
+if (isset($obscure_failure_messages) && in_array($result->value, $obscure_failure_messages) ) { $result = ResultCode::BAD_CREDENTIALS; }
 
 # Set error message, criticity and fa_class
+#print "result: ".$result;
 
 if ($result) {
-    $smarty->assign('error', $messages[$result]);
-    // TODO : Make it clean $error_sms - START
-    if ($action == 'sendsms') {
-        if (isset($result) && ($result == 'smscrypttokensrequired' || $result == 'smsuserfound' || $result == 'smssent' || $result == 'smssent_ifexists' || $result == 'tokenattempts')) {
-            $smarty->assign('error_sms', $result);
-        } else {
-            $smarty->assign('error_sms', false);
-        }
-    }
+    $lang_class->assign_smarty_result_message($result, $smarty);
+    $lang_class->assign_smarty_sms_error_message($result, $smarty);
     // TODO : Make it clean $error_sms - END
-    $smarty->assign('result_criticity', get_criticity($result));
-    $smarty->assign('result_fa_class', get_fa_class($result));
+    $smarty->assign('result_criticity', $result->get_criticity()->value);
+    $smarty->assign('result_fa_class', $result->get_fa_class());
 } else {
     $smarty->assign('error', "");
 }
-$smarty->assign('result', $result);
+$smarty->assign('result', $result->value);
 
 # Set dependency check message, criticity and fa_class
 
 $dependency_errors = array();
 foreach ($dependency_check_results as $result) {
-    $dependency_errors[$result] = array( 'error' => $messages[$result], 'criticity' => get_criticity($result), 'fa_class' => get_fa_class($result) );
+    $dependency_errors[$result->value] = array( 'error' => $lang_class->{$result}, 'criticity' => $result->get_criticity, 'fa_class' => $result->get_fa_class() );
 }
 $smarty->assign('dependency_errors', $dependency_errors);
 
+print ''.(microtime()-$cur);
 $smarty->display('index.tpl');

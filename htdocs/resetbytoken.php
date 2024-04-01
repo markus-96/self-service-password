@@ -21,11 +21,12 @@
 
 # This page is called to reset a password when a valid token is found in URL
 
+use Ssp\ResultCode\ResultCode;
 #==============================================================================
 # POST parameters
 #==============================================================================
 # Initiate vars
-$result = "";
+$result = ResultCode::SUCCESS;
 $login = $presetLogin;
 $token = "";
 $tokenid = "";
@@ -38,12 +39,12 @@ $mail = "";
 $extended_error_msg = "";
 
 if (isset($_REQUEST["token"]) and $_REQUEST["token"]) { $token = strval($_REQUEST["token"]); }
-else { $result = "tokenrequired"; }
+else { $result = ResultCode::TOKEN_REQUIRED; }
 
 #==============================================================================
 # Get token
 #==============================================================================
-if ( $result === "" ) {
+if ( $result === ResultCode::SUCCESS ) {
 
     # Open session with the token
     if ( $crypt_tokens ) {
@@ -65,16 +66,16 @@ if ( $result === "" ) {
     $posttoken = isset($_REQUEST['smstoken']) ? $_REQUEST['smstoken'] : 'undefined';
 
     if ( !$login ) {
-        $result = "tokennotvalid";
+        $result = ResultCode::TOKEN_NOT_VALID;
         error_log("Unable to open session $tokenid");
     } else if ( $smstoken and $posttoken !== $smstoken ) {
-        $result = "tokennotvalid";
+        $result = ResultCode::TOKEN_NOT_VALID;
         error_log("Token not associated with SMS code ".$posttoken);
     } else if (isset($token_lifetime)) {
         # Manage lifetime with session content
         $tokentime = $_SESSION['time'];
         if ( time() - $tokentime > $token_lifetime ) {
-            $result = "tokennotvalid";
+            $result = ResultCode::TOKEN_NOT_VALID;
             error_log("Token lifetime expired");
         }
     }
@@ -86,21 +87,21 @@ if ( $result === "" ) {
 if ( $result === "" ) {
 
     if (isset($_POST["confirmpassword"]) and $_POST["confirmpassword"]) { $confirmpassword = $_POST["confirmpassword"]; }
-    else { $result = "confirmpasswordrequired"; }
+    else { $result = ResultCode::CONFIRM_PASSWORD_REQUIRED; }
     if (isset($_POST["newpassword"]) and $_POST["newpassword"]) { $newpassword = $_POST["newpassword"]; }
-    else { $result = "newpasswordrequired"; }
+    else { $result = ResultCode::NEW_PASSWORD_REQUIRED; }
 }
 
 #==============================================================================
 # Find user
 #==============================================================================
-if ( $result === "" ) {
+if ( $result === ResultCode::SUCCESS ) {
 
     # Connect to LDAP
     $ldap_connection = \Ltb\Ldap::connect($ldap_url, $ldap_starttls, $ldap_binddn, $ldap_bindpw, $ldap_network_timeout, $ldap_krb5ccname);
 
     $ldap = $ldap_connection[0];
-    $result = $ldap_connection[1];
+    $result = !($ldap_connection[1]) ? ResultCode::SUCCESS : ResultCode::from($ldap_connection[1]);
 
     if ( $ldap ) {
 
@@ -110,7 +111,7 @@ if ( $result === "" ) {
 
             $errno = ldap_errno($ldap);
             if ( $errno ) {
-                $result = "ldaperror";
+                $result = ResultCode::LDAP_ERROR;
                 error_log("LDAP - Search error $errno (".ldap_error($ldap).")");
             } else {
 
@@ -118,7 +119,7 @@ if ( $result === "" ) {
                 $entry = ldap_first_entry($ldap, $search);
 
                 if( !$entry ) {
-                    $result = "badcredentials";
+                    $result = ResultCode::BAD_CREDENTIALS;
                     error_log("LDAP - User $login not found");
                 } else {
 
@@ -147,12 +148,12 @@ if ( $result === "" ) {
 # Check and register new passord
 #==============================================================================
 # Match new and confirm password
-if ( !$result ) {
-    if ( $newpassword != $confirmpassword ) { $result="nomatch"; }
+if ( $result === ResultCode::SUCCESS ) {
+    if ( $newpassword != $confirmpassword ) { $result=ResultCode::NO_MATCH; }
 }
 
 # Check password strength
-if ( !$result ) {
+if ( $result === ResultCode::SUCCESS ) {
     $entry_array = ldap_get_attributes($ldap, $entry);
     $result = check_password_strength( $newpassword, "", $pwd_policy_config, $login, $entry_array );
 }
@@ -165,11 +166,11 @@ if ( !$result ) {
     }
     if ( ! isset($prehook_return) || $prehook_return === 0 || $ignore_prehook_error ) {
         $result = change_password($ldap, $userdn, $newpassword, $ad_mode, $ad_options, $samba_mode, $samba_options, $shadow_options, $hash, $hash_options, "", "", $ldap_use_exop_passwd, $ldap_use_ppolicy_control);
-        if ( $result === "passwordchanged" && isset($posthook) ) {
+        if ( $result === ResultCode::PASSWORD_CHANGED && isset($posthook) ) {
             $command = hook_command($posthook, $login, $newpassword, null, $posthook_password_encodebase64);
             exec($command, $posthook_output, $posthook_return);
         }
-        if ( $result !== "passwordchanged" ) {
+        if ( $result !== ResultCode::PASSWORD_CHANGED ) {
             if ( $show_extended_error ) {
                 ldap_get_option($ldap, 0x0032, $extended_error_msg);
             }
@@ -178,7 +179,7 @@ if ( !$result ) {
 }
 
 # Delete token if all is ok
-if ( $result === "passwordchanged" ) {
+if ( $result === ResultCode::PASSWORD_CHANGED ) {
     $_SESSION = array();
     session_destroy();
 }
@@ -186,7 +187,7 @@ if ( $result === "passwordchanged" ) {
 #==============================================================================
 # Notify password change
 #==============================================================================
-if ($mail and $notify_on_change and $result === 'passwordchanged') {
+if ($mail and $notify_on_change and $result === ResultCode::PASSWORD_CHANGED) {
     $data = array( "login" => $login, "mail" => $mail, "password" => $newpassword);
     if ( !send_mail($mailer, $mail, $mail_from, $mail_from_name, $messages["changesubject"], $messages["changemessage"].$mail_signature, $data) ) {
         error_log("Error while sending change email to $mail (user $login)");
